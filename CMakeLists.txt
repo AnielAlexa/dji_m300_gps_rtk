@@ -11,59 +11,40 @@ find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 
-# Path to DJI Payload SDK - support multiple location methods
-# Priority: Environment variable > Relative path > Default path
-if(DEFINED ENV{DJI_SDK_PATH})
-  set(PSDK_PATH "$ENV{DJI_SDK_PATH}")
-  message(STATUS "Using DJI SDK from environment: ${PSDK_PATH}")
-elseif(EXISTS "${CMAKE_SOURCE_DIR}/../../../../Payload-SDK")
-  # Relative path from workspace
-  get_filename_component(PSDK_PATH "${CMAKE_SOURCE_DIR}/../../../../Payload-SDK" ABSOLUTE)
-  message(STATUS "Using DJI SDK from relative path: ${PSDK_PATH}")
-else()
-  # Fallback to absolute path (for current setup)
-  set(PSDK_PATH "/home/jetson/ros2_ws/src/Payload-SDK")
-  message(STATUS "Using default DJI SDK path: ${PSDK_PATH}")
-endif()
-
-# Check if Payload SDK exists
-if(NOT EXISTS "${PSDK_PATH}")
-  message(FATAL_ERROR "DJI Payload SDK not found at '${PSDK_PATH}'")
-endif()
-message(STATUS "DJI Payload SDK found at: ${PSDK_PATH}")
+# Vendored DJI Payload SDK (self-contained, no external dependency)
+set(PSDK_VENDOR_DIR "${CMAKE_CURRENT_SOURCE_DIR}/psdk_vendor")
 
 # Add system dependencies
 find_package(Threads REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBUSB REQUIRED libusb-1.0)
 
-# Include directories for Payload SDK
+# Include directories - all local
 include_directories(
   include
-  ${PSDK_PATH}/psdk_lib/include
-  ${PSDK_PATH}/samples/sample_c/platform/linux/manifold2/hal
-  ${PSDK_PATH}/samples/sample_c/platform/linux/manifold2/application
-  ${PSDK_PATH}/samples/sample_c/platform/linux/common/osal
-  ${PSDK_PATH}/samples/sample_c/platform/linux/common
+  ${PSDK_VENDOR_DIR}/include
+  ${PSDK_VENDOR_DIR}/hal
+  ${PSDK_VENDOR_DIR}/osal
+  ${PSDK_VENDOR_DIR}
   /usr/include/libusb-1.0
 )
 
-# Link directories - use aarch64 library for Jetson/ARM64
+# Link the vendored static library
 link_directories(
-  ${PSDK_PATH}/psdk_lib/lib/aarch64-linux-gnu-gcc
+  ${PSDK_VENDOR_DIR}/lib
 )
 
-# Source files from Payload SDK for UART/USB communication
+# HAL and OSAL source files (vendored)
 set(PSDK_HAL_SOURCES
-  ${PSDK_PATH}/samples/sample_c/platform/linux/manifold2/hal/hal_uart.c
-  ${PSDK_PATH}/samples/sample_c/platform/linux/manifold2/hal/hal_network.c
-  ${PSDK_PATH}/samples/sample_c/platform/linux/manifold2/hal/hal_usb_bulk.c
+  ${PSDK_VENDOR_DIR}/hal/hal_uart.c
+  ${PSDK_VENDOR_DIR}/hal/hal_network.c
+  ${PSDK_VENDOR_DIR}/hal/hal_usb_bulk.c
 )
 
 set(PSDK_OSAL_SOURCES
-  ${PSDK_PATH}/samples/sample_c/platform/linux/common/osal/osal_fs.c
-  ${PSDK_PATH}/samples/sample_c/platform/linux/common/osal/osal_socket.c
-  ${PSDK_PATH}/samples/sample_c/platform/linux/common/osal/osal.c
+  ${PSDK_VENDOR_DIR}/osal/osal_fs.c
+  ${PSDK_VENDOR_DIR}/osal/osal_socket.c
+  ${PSDK_VENDOR_DIR}/osal/osal.c
 )
 
 # Create the ROS2 node executable

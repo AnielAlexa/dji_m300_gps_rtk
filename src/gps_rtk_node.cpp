@@ -17,9 +17,9 @@ extern "C" {
 #include "hal_uart.h"
 #include "hal_usb_bulk.h"
 // OSAL handlers
-#include "osal/osal.h"
-#include "osal/osal_fs.h"
-#include "osal/osal_socket.h"
+#include "osal.h"
+#include "osal_fs.h"
+#include "osal_socket.h"
 // App credentials
 #include "dji_sdk_app_info.h"
 #include "dji_sdk_config.h"
