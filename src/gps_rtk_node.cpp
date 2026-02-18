@@ -9,7 +9,20 @@
 // DJI SDK headers (from Payload SDK)
 extern "C" {
 #include "dji_platform.h"
+#include "dji_core.h"
+#include "dji_logger.h"
 #include "dji_fc_subscription.h"
+#include "dji_aircraft_info.h"
+// HAL handlers
+#include "hal_uart.h"
+#include "hal_usb_bulk.h"
+// OSAL handlers
+#include "osal/osal.h"
+#include "osal/osal_fs.h"
+#include "osal/osal_socket.h"
+// App credentials
+#include "dji_sdk_app_info.h"
+#include "dji_sdk_config.h"
 }
 
 using namespace std::chrono_literals;
@@ -52,14 +65,109 @@ GpsRtkNode::~GpsRtkNode() {
 void GpsRtkNode::init_payload_sdk() {
   T_DjiReturnCode returnCode;
 
-  // Initialize FC subscription module
-  // Note: The Payload SDK platform, OSAL, and HAL handlers should already be
-  // registered by the main DJI SDK application that started this node
-  returnCode = DjiFcSubscription_Init();
+  // ── Step 1: Register OSAL handlers ────────────────────────────────────────
+  T_DjiOsalHandler osalHandler = {
+    .TaskCreate         = Osal_TaskCreate,
+    .TaskDestroy        = Osal_TaskDestroy,
+    .TaskSleepMs        = Osal_TaskSleepMs,
+    .MutexCreate        = Osal_MutexCreate,
+    .MutexDestroy       = Osal_MutexDestroy,
+    .MutexLock          = Osal_MutexLock,
+    .MutexUnlock        = Osal_MutexUnlock,
+    .SemaphoreCreate    = Osal_SemaphoreCreate,
+    .SemaphoreDestroy   = Osal_SemaphoreDestroy,
+    .SemaphoreWait      = Osal_SemaphoreWait,
+    .SemaphoreTimedWait = Osal_SemaphoreTimedWait,
+    .SemaphorePost      = Osal_SemaphorePost,
+    .GetTimeMs          = Osal_GetTimeMs,
+    .GetTimeUs          = Osal_GetTimeUs,
+    .GetRandomNum       = Osal_GetRandomNum,
+    .Malloc             = Osal_Malloc,
+    .Free               = Osal_Free,
+  };
+  returnCode = DjiPlatform_RegOsalHandler(&osalHandler);
+  if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
+    throw std::runtime_error("Failed to register OSAL handler");
+  }
+
+  // ── Step 2: Register HAL UART handler ─────────────────────────────────────
+  T_DjiHalUartHandler uartHandler = {
+    .UartInit      = HalUart_Init,
+    .UartDeInit    = HalUart_DeInit,
+    .UartWriteData = HalUart_WriteData,
+    .UartReadData  = HalUart_ReadData,
+    .UartGetStatus = HalUart_GetStatus,
+  };
+  returnCode = DjiPlatform_RegHalUartHandler(&uartHandler);
+  if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
+    throw std::runtime_error("Failed to register HAL UART handler");
+  }
+
+  // ── Step 3: Register HAL USB-Bulk handler ─────────────────────────────────
+#if (CONFIG_HARDWARE_CONNECTION == DJI_USE_UART_AND_USB_BULK_DEVICE)
+  T_DjiHalUsbBulkHandler usbBulkHandler = {
+    .UsbBulkInit          = HalUsbBulk_Init,
+    .UsbBulkDeInit        = HalUsbBulk_DeInit,
+    .UsbBulkWriteData     = HalUsbBulk_WriteData,
+    .UsbBulkReadData      = HalUsbBulk_ReadData,
+    .UsbBulkGetDeviceInfo = HalUsbBulk_GetDeviceInfo,
+  };
+  returnCode = DjiPlatform_RegHalUsbBulkHandler(&usbBulkHandler);
+  if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
+    throw std::runtime_error("Failed to register HAL USB-Bulk handler");
+  }
+#endif
+
+  // ── Step 4: Register filesystem handler ───────────────────────────────────
+  T_DjiFileSystemHandler fileSystemHandler = {
+    .FileOpen  = Osal_FileOpen,
+    .FileClose = Osal_FileClose,
+    .FileWrite = Osal_FileWrite,
+    .FileRead  = Osal_FileRead,
+    .FileSeek  = Osal_FileSeek,
+    .FileSync  = Osal_FileSync,
+    .DirOpen   = Osal_DirOpen,
+    .DirClose  = Osal_DirClose,
+    .DirRead   = Osal_DirRead,
+    .Mkdir     = Osal_Mkdir,
+    .Unlink    = Osal_Unlink,
+    .Rename    = Osal_Rename,
+    .Stat      = Osal_Stat,
+  };
+  returnCode = DjiPlatform_RegFileSystemHandler(&fileSystemHandler);
+  if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
+    throw std::runtime_error("Failed to register filesystem handler");
+  }
+
+  // ── Step 5: Fill in user/app credentials and call DjiCore_Init ────────────
+  T_DjiUserInfo userInfo;
+  memset(&userInfo, 0, sizeof(T_DjiUserInfo));
+  strncpy(userInfo.appName,          USER_APP_NAME,          sizeof(userInfo.appName) - 1);
+  strncpy(userInfo.appId,            USER_APP_ID,            sizeof(userInfo.appId) - 1);
+  strncpy(userInfo.appKey,           USER_APP_KEY,           sizeof(userInfo.appKey) - 1);
+  strncpy(userInfo.appLicense,       USER_APP_LICENSE,       sizeof(userInfo.appLicense) - 1);
+  strncpy(userInfo.developerAccount, USER_DEVELOPER_ACCOUNT, sizeof(userInfo.developerAccount) - 1);
+  strncpy(userInfo.baudRate,         USER_BAUD_RATE,         sizeof(userInfo.baudRate) - 1);
+
+  returnCode = DjiCore_Init(&userInfo);
   if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
     throw std::runtime_error(
-        "Failed to initialize FC subscription - "
-        "Ensure DJI SDK is properly initialized in your main application");
+        "DjiCore_Init failed (rc=" + std::to_string(returnCode) + ") - "
+        "check UART connection and app credentials in dji_sdk_app_info.h");
+  }
+
+  // ── Step 6: Start the application ─────────────────────────────────────────
+  returnCode = DjiCore_ApplicationStart();
+  if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
+    throw std::runtime_error("DjiCore_ApplicationStart failed");
+  }
+
+  RCLCPP_INFO(this->get_logger(), "DJI Core initialized successfully");
+
+  // ── Step 7: Initialize FC subscription module ─────────────────────────────
+  returnCode = DjiFcSubscription_Init();
+  if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
+    throw std::runtime_error("Failed to initialize FC subscription");
   }
 
   RCLCPP_INFO(this->get_logger(), "FC Subscription initialized");
@@ -245,8 +353,9 @@ void GpsRtkNode::cleanup() {
     DjiFcSubscription_UnSubscribeTopic(DJI_FC_SUBSCRIPTION_TOPIC_RTK_POSITION);
     DjiFcSubscription_UnSubscribeTopic(DJI_FC_SUBSCRIPTION_TOPIC_RTK_POSITION_INFO);
 
-    // Deinit
+    // Deinit FC subscription then core
     DjiFcSubscription_DeInit();
+    DjiCore_DeInit();
     psdk_initialized_ = false;
   }
 }

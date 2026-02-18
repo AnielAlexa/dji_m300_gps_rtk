@@ -22,7 +22,7 @@ elseif(EXISTS "${CMAKE_SOURCE_DIR}/../../../../Payload-SDK")
   message(STATUS "Using DJI SDK from relative path: ${PSDK_PATH}")
 else()
   # Fallback to absolute path (for current setup)
-  set(PSDK_PATH "/home/aniel/skyline_drone/Payload-SDK")
+  set(PSDK_PATH "/home/jetson/ros2_ws/src/Payload-SDK")
   message(STATUS "Using default DJI SDK path: ${PSDK_PATH}")
 endif()
 
@@ -42,14 +42,15 @@ include_directories(
   include
   ${PSDK_PATH}/psdk_lib/include
   ${PSDK_PATH}/samples/sample_c/platform/linux/manifold2/hal
-  ${PSDK_PATH}/samples/sample_c/platform/linux/manifold2/osal
+  ${PSDK_PATH}/samples/sample_c/platform/linux/manifold2/application
+  ${PSDK_PATH}/samples/sample_c/platform/linux/common/osal
   ${PSDK_PATH}/samples/sample_c/platform/linux/common
   /usr/include/libusb-1.0
 )
 
-# Link directories
+# Link directories - use aarch64 library for Jetson/ARM64
 link_directories(
-  ${PSDK_PATH}/psdk_lib/lib/x86_64-linux-gnu-gcc
+  ${PSDK_PATH}/psdk_lib/lib/aarch64-linux-gnu-gcc
 )
 
 # Source files from Payload SDK for UART/USB communication
